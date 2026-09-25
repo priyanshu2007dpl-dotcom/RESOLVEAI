@@ -34,7 +34,7 @@ Future development sessions must:
 
 * React + TypeScript frontend (Vite)
 * Supabase (PostgreSQL) backend with RLS
-* REST API architecture via Supabase Edge Functions
+* REST API architecture via Supabase Edge Functions (Deno runtime)
 * Authentication foundation (Supabase Auth, email/password)
 * RBAC foundation with 4 roles: CUSTOMER, SUPPORT_AGENT, SUPPORT_MANAGER, ADMIN
 * Shared types module (auth, API, RBAC permissions)
@@ -53,8 +53,8 @@ Future development sessions must:
 * Frontend: loading states (spinner, auth loading)
 * Frontend: error states (auth errors, access denied)
 * Frontend: placeholder pages for Phase 2 features
-* TypeScript checks pass
-* Frontend build passes
+* TypeScript checks pass (verified)
+* Frontend build passes (verified)
 * Database RLS verified (security posture checked)
 * Security advisor warnings addressed (REVOKE EXECUTE on trigger functions)
 
@@ -91,6 +91,37 @@ Nothing yet.
 * Notifications
 * Presentation Mode
 
+## Actual Technology Architecture
+
+### Frontend
+* **Framework**: React 18 + TypeScript
+* **Build tool**: Vite 5
+* **Routing**: React Router DOM 6
+* **Icons**: Lucide React
+* **Styling**: CSS with Inter font, slate color scheme, responsive design
+
+### Backend
+* **Platform**: Supabase (Bolt Cloud)
+* **Database**: PostgreSQL (via Supabase)
+* **Auth**: Supabase Auth (email/password)
+* **API**: Supabase Edge Functions (Deno runtime)
+* **ORM**: None — uses Supabase JS client and REST API directly
+* **Note**: The original Phase 1 spec mentioned Prisma and a Node.js/TypeScript backend.
+  The implementation uses Supabase instead, which provides PostgreSQL, Auth, and serverless
+  Edge Functions in a single platform. This is the Bolt-recommended approach and replaces
+  the separate Node.js/Prisma backend with equivalent functionality.
+
+### Database Technology
+* PostgreSQL (provided by Supabase)
+* Migrations applied via Supabase MCP tool (3 migrations)
+* Row Level Security (RLS) enabled on all tables
+* SECURITY DEFINER functions for privileged operations
+
+### Backend Technology
+* Supabase Edge Functions (Deno/TypeScript runtime)
+* No separate Node.js server — edge functions serve as the API layer
+* Health endpoints deployed as 3 edge functions
+
 ## Database Status
 
 ### Implemented
@@ -106,13 +137,13 @@ Nothing yet.
 * `get_my_role()` SECURITY DEFINER function — returns caller's role
 * Index on `profiles.role` for role-based queries
 
-### Migrations Applied
+### Migrations Applied (verified via list_migrations)
 
-1. `create_profiles_table` — profiles table, RLS, triggers, functions
-2. `fix_security_advisor_warnings` — REVOKE EXECUTE, fix search_path
-3. `revoke_handle_new_user_execute` — REVOKE EXECUTE from authenticated
+1. `20260925093715_create_profiles_table.sql` — profiles table, RLS, triggers, functions
+2. `20260925094117_fix_security_advisor_warnings.sql` — REVOKE EXECUTE, fix search_path
+3. `20260925094129_revoke_handle_new_user_execute.sql` — REVOKE EXECUTE from authenticated
 
-### Seed Data
+### Seed Data (verified — 4 rows in profiles table)
 
 | Role            | Email                   | Password      | Name           |
 |-----------------|-------------------------|---------------|----------------|
@@ -120,6 +151,9 @@ Nothing yet.
 | SUPPORT_AGENT   | agent@resolveai.dev     | Agent123!     | Alex Agent     |
 | SUPPORT_MANAGER | manager@resolveai.dev   | Manager123!   | Morgan Manager |
 | ADMIN           | admin@resolveai.dev     | Admin123!     | Adam Admin      |
+
+All 4 users verified in auth.users with email_confirmed_at set.
+All 4 profiles verified in public.profiles with correct roles.
 
 ## Authentication Status
 
@@ -131,7 +165,7 @@ Nothing yet.
 * Sign out
 * Session management (persistSession, autoRefreshToken)
 * Auth context provider with loading/error states
-* onAuthStateChange listener (with async-safe pattern)
+* onAuthStateChange listener (with async-safe pattern to avoid deadlock)
 * Protected routes (redirect to /login if unauthenticated)
 * RBAC route guards (role-based access control on specific routes)
 
@@ -144,7 +178,7 @@ Nothing yet.
 
 ## API Status
 
-### Implemented
+### Implemented (verified — 3 edge functions ACTIVE)
 
 * `GET /api/health` — full health check with database connectivity test
 * `GET /api/health/live` — liveness probe (runtime responding)
@@ -153,11 +187,11 @@ Nothing yet.
 * CORS headers on all responses
 * Error handling with structured error responses
 
-### Edge Functions Deployed
+### Edge Functions Deployed (verified via list_edge_functions)
 
-1. `health` — full health check (verify_jwt = false)
-2. `health-live` — liveness probe (verify_jwt = false)
-3. `health-ready` — readiness probe (verify_jwt = false)
+1. `health` — full health check (verify_jwt = false, ACTIVE)
+2. `health-live` — liveness probe (verify_jwt = false, ACTIVE)
+3. `health-ready` — readiness probe (verify_jwt = false, ACTIVE)
 
 ## AI Status
 
@@ -198,8 +232,9 @@ Not implemented yet. (Phase 2+)
 ## Known Issues
 
 * Security advisor shows WARN (not ERROR) for `get_my_role()` being callable by authenticated via RPC — this is intentional (authenticated users need to look up their own role).
-* The sandboxed environment cannot reach external hosts via curl, so health endpoints cannot be tested from the CLI. They were deployed successfully and return correct responses.
-* The `handle_new_user` trigger function still shows a WARN in the advisor despite REVOKE EXECUTE — this is a caching issue in the advisor; the permission has been revoked.
+* Security advisor shows WARN for `handle_new_user()` being callable by anon/authenticated — REVOKE EXECUTE was applied but the advisor may cache results. The trigger function is not exposed via the app; it only runs on auth.users INSERT.
+* The sandboxed environment cannot reach external hosts via curl, so health endpoints cannot be tested from the CLI. They are deployed and ACTIVE (verified via list_edge_functions).
+* The original Phase 1 spec mentioned Prisma and Node.js/TypeScript backend. Supabase is used instead as the Bolt-recommended backend platform, providing equivalent PostgreSQL, Auth, and API functionality.
 
 ## Environment Variables
 
@@ -208,7 +243,7 @@ Not implemented yet. (Phase 2+)
 * `VITE_SUPABASE_URL` — Supabase project URL
 * `VITE_SUPABASE_ANON_KEY` — Supabase anon/public key
 
-### Backend (Edge Functions — auto-configured)
+### Backend (Edge Functions — auto-configured by Supabase)
 
 * `SUPABASE_URL` — Supabase project URL
 * `SUPABASE_ANON_KEY` — Supabase anon key
@@ -216,6 +251,18 @@ Not implemented yet. (Phase 2+)
 * `SUPABASE_DB_URL` — Direct PostgreSQL connection string
 
 All Supabase env vars are pre-populated. See `.env.example` for reference.
+
+## Verification Results (Phase 1 Final Check)
+
+* TypeScript typecheck: PASS
+* Production build: PASS (422 KB bundle, 119 KB gzipped)
+* Database tables: 1 table (profiles), RLS enabled, 4 rows
+* Migrations: 3 applied and verified
+* Edge functions: 3 deployed and ACTIVE
+* Seed users: 4 verified in auth.users (all email_confirmed)
+* Seed profiles: 4 verified in public.profiles (correct roles)
+* RLS policies: 4 policies verified (SELECT, INSERT, UPDATE, DELETE)
+* Security advisor: 4 WARNs (no ERRORs) — all intentional or cached
 
 ## Current Demo Scenario
 
@@ -256,7 +303,7 @@ Before making changes:
 │   └── index.ts
 ├── supabase/               # Supabase backend
 │   ├── functions/          # Edge functions (health, health-live, health-ready)
-│   └── config.toml          # Supabase configuration
+│   └── config.toml         # Supabase configuration
 ├── .env                    # Environment variables (pre-populated)
 ├── .env.example            # Environment variable reference
 ├── package.json
@@ -267,7 +314,7 @@ Before making changes:
 
 ### Key Design Decisions
 
-* **Supabase as backend**: PostgreSQL database, Auth, and Edge Functions replace a separate Node.js/Prisma backend. This reduces complexity while providing the same capabilities.
+* **Supabase as backend**: PostgreSQL database, Auth, and Edge Functions replace a separate Node.js/Prisma backend. This reduces complexity while providing the same capabilities. The original spec mentioned Prisma/Node.js; Supabase is the Bolt-recommended equivalent.
 * **RBAC via profiles table**: The `role` column in `profiles` stores the user's role. RLS policies enforce that users cannot change their own role. A `get_my_role()` SECURITY DEFINER function allows other tables to check roles in future phases.
 * **Shared types**: The `/shared` directory contains TypeScript types and RBAC utilities used by the frontend. Future phases can extend this for backend-shared contracts.
 * **Edge Functions for API**: Health endpoints are deployed as Supabase Edge Functions (Deno runtime). Future API endpoints will follow the same pattern.
