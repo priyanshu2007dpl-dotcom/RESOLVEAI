@@ -1,0 +1,10 @@
+# ResolveAI — Supabase configuration
+
+[functions.health]
+verify_jwt = false
+
+[functions.health-live]
+verify_jwt = false
+
+[functions.health-ready]
+verify_jwt = false
